@@ -1,0 +1,8 @@
+{
+  "name": "SyncLife - Circadian Academic & Double-Focus Scheduler",
+  "description": "Circadian-balanced day planning and anti-burnout focus app optimized for university students preparing for competitive exams.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
