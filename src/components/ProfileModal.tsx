@@ -1,8 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { User } from 'firebase/auth';
 import { TimeSlot } from '../types';
 import { BadgesSection } from './BadgesSection';
 import { WeeklyGoalTracker } from './WeeklyGoalTracker';
 import { FirebaseAuthCard } from './FirebaseAuthCard';
+import {
+  subscribeToAuth,
+  getUserProfileFromFirestore,
+  updateUserDisplayName,
+  formatNameFromEmail,
+} from '../firebase/authService';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -28,6 +35,57 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   useEffect(() => {
     localStorage.setItem('synclife_consistency_streak', baseStreak.toString());
   }, [baseStreak]);
+
+  // User Authentication & Dynamic Name State
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [displayName, setDisplayName] = useState<string>(() => {
+    return localStorage.getItem('synclife_user_name') || 'Guest Student';
+  });
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+
+  useEffect(() => {
+    const unsubscribe = subscribeToAuth(async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        // Load profile from Firestore or Auth
+        const remote = await getUserProfileFromFirestore(user.uid);
+        const resolvedName =
+          remote?.displayName ||
+          user.displayName ||
+          formatNameFromEmail(user.email) ||
+          'Student';
+        setDisplayName(resolvedName);
+        setNameInput(resolvedName);
+        localStorage.setItem('synclife_user_name', resolvedName);
+      } else {
+        const saved = localStorage.getItem('synclife_user_name');
+        if (saved) {
+          setDisplayName(saved);
+          setNameInput(saved);
+        } else {
+          setDisplayName('Guest Student');
+          setNameInput('Guest Student');
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleSaveName = async () => {
+    if (!nameInput.trim()) return;
+    const newName = nameInput.trim();
+    setDisplayName(newName);
+    setIsEditingName(false);
+    localStorage.setItem('synclife_user_name', newName);
+
+    if (currentUser) {
+      await updateUserDisplayName(newName);
+      onTriggerToast(`Profile name updated to ${newName}! ✏️`, 'NAME UPDATED');
+    } else {
+      onTriggerToast(`Display name set to ${newName}! ✏️`, 'SAVED');
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -139,24 +197,79 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       <div className="bg-surface-container rounded-2xl w-full max-w-md p-5 shadow-2xl border border-outline-variant/40 space-y-4 max-h-[90vh] overflow-y-auto no-scrollbar">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <img
-              alt="Profile"
-              className="w-12 h-12 rounded-full object-cover ring-2 ring-primary/40 shadow-sm"
-              src="https://lh3.googleusercontent.com/aida-public/AB6AXuAOMDQoUzDkq-JykuUms-GUFHQbp9_N95r7yHqspuzekkVhYdBNG6CLN2j-ncGvCWUD3qRNXObfTQAmtl71C_tUEjwCNlxXVydizzOQnoMGleKZi7UMZz3aMRuxj9wObeEhGg7w9e0WIhfm9LFRF_K_J4vw6bJeqUdefQY-NgoFOHhcQSoEqRAUMy7B3PELz5MWXEzZyetx25-qqxyfpYM5d10WtoTmACs6trCuITphwSNBJINd6nXX"
-            />
-            <div>
-              <h3 className="font-headline text-lg font-bold text-on-surface">
-                Ananya Goel
-              </h3>
-              <p className="font-body text-xs text-on-surface-variant">
-                Double-Focus Regime (B.Tech CS + SSC CGL)
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            {currentUser?.photoURL ? (
+              <img
+                alt={displayName}
+                className="w-12 h-12 rounded-full object-cover ring-2 ring-primary/40 shadow-sm shrink-0"
+                src={currentUser.photoURL}
+              />
+            ) : (
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-amber-500 text-on-primary font-headline font-bold text-lg flex items-center justify-center shadow-md ring-2 ring-primary/30 shrink-0">
+                {displayName.charAt(0).toUpperCase() || 'S'}
+              </div>
+            )}
+
+            <div className="min-w-0 flex-1">
+              {isEditingName ? (
+                <div className="flex items-center gap-1.5 py-0.5">
+                  <input
+                    type="text"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    placeholder="Enter your name"
+                    autoFocus
+                    className="bg-surface-container-high border border-primary/50 rounded-lg px-2 py-0.5 text-sm text-on-surface font-headline font-bold focus:outline-none focus:ring-1 focus:ring-primary w-full max-w-[170px]"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveName();
+                      if (e.key === 'Escape') setIsEditingName(false);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveName}
+                    className="p-1 rounded-md bg-primary text-on-primary hover:bg-primary/90 text-xs cursor-pointer"
+                    title="Save name"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">check</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingName(false)}
+                    className="p-1 rounded-md text-on-surface-variant hover:text-on-surface text-xs cursor-pointer"
+                    title="Cancel"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">close</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <h3 className="font-headline text-lg font-bold text-on-surface truncate">
+                    {displayName}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNameInput(displayName);
+                      setIsEditingName(true);
+                    }}
+                    title="Edit profile name"
+                    className="p-1 text-on-surface-variant hover:text-primary hover:bg-surface-container-high rounded-md transition cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">edit</span>
+                  </button>
+                </div>
+              )}
+
+              <p className="font-body text-xs text-on-surface-variant truncate">
+                {currentUser?.email ? currentUser.email : 'Double-Focus Regime (Competitive Exam Prep)'}
               </p>
             </div>
           </div>
+
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center text-on-surface-variant hover:text-on-surface transition cursor-pointer"
+            className="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center text-on-surface-variant hover:text-on-surface transition cursor-pointer shrink-0 ml-2"
           >
             <span className="material-symbols-outlined text-[18px]">close</span>
           </button>

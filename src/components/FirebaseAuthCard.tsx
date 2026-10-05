@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
 import {
   signInWithGoogle,
+  signInWithEmail,
+  signUpWithEmail,
   signInGuest,
   logoutUser,
   subscribeToAuth,
   syncSlotsToFirestore,
   loadSlotsFromFirestore,
+  formatNameFromEmail,
 } from '../firebase/authService';
 import { TimeSlot } from '../types';
 
@@ -24,6 +27,15 @@ export const FirebaseAuthCard: React.FC<FirebaseAuthCardProps> = ({
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // Email Auth State
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [nameInput, setNameInput] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+
   useEffect(() => {
     const unsubscribe = subscribeToAuth((user) => {
       setCurrentUser(user);
@@ -33,19 +45,61 @@ export const FirebaseAuthCard: React.FC<FirebaseAuthCardProps> = ({
 
   const handleGoogleLogin = async () => {
     try {
+      setAuthError(null);
       const user = await signInWithGoogle();
       if (user) {
-        onTriggerToast(`Signed in as ${user.displayName || user.email}! ☁️`, 'FIREBASE AUTH');
-        // Auto sync
+        const studentName = user.displayName || formatNameFromEmail(user.email);
+        onTriggerToast(`Signed in as ${studentName}! ☁️`, 'FIREBASE AUTH');
         await syncSlotsToFirestore(user.uid, slots);
       }
-    } catch {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Google sign-in failed';
+      setAuthError(msg);
       onTriggerToast('Google Sign-in cancelled or failed', 'AUTH CANCEL');
+    }
+  };
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailInput.trim() || !passwordInput.trim()) {
+      setAuthError('Please enter both email and password.');
+      return;
+    }
+
+    setAuthError(null);
+    setIsAuthLoading(true);
+
+    try {
+      let user: User | null = null;
+      if (isRegistering) {
+        user = await signUpWithEmail(emailInput.trim(), passwordInput, nameInput.trim());
+        const studentName = user?.displayName || nameInput.trim() || formatNameFromEmail(emailInput);
+        onTriggerToast(`Account created! Welcome, ${studentName} 🎓`, 'ACCOUNT CREATED');
+      } else {
+        user = await signInWithEmail(emailInput.trim(), passwordInput);
+        const studentName = user?.displayName || formatNameFromEmail(emailInput);
+        onTriggerToast(`Welcome back, ${studentName}! ☁️`, 'SIGNED IN');
+      }
+
+      if (user) {
+        await syncSlotsToFirestore(user.uid, slots);
+        setShowEmailForm(false);
+        setEmailInput('');
+        setPasswordInput('');
+        setNameInput('');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Authentication failed';
+      setAuthError(msg.replace('Firebase: ', ''));
+      onTriggerToast('Authentication failed', 'AUTH ERROR');
+    } finally {
+      setIsAuthLoading(false);
     }
   };
 
   const handleGuestLogin = async () => {
     try {
+      setAuthError(null);
       const user = await signInGuest();
       if (user) {
         onTriggerToast('Signed in as Guest with Cloud Sync! ☁️', 'ANONYMOUS');
@@ -95,6 +149,10 @@ export const FirebaseAuthCard: React.FC<FirebaseAuthCardProps> = ({
     }
   };
 
+  const userDisplayName =
+    currentUser?.displayName ||
+    (currentUser?.email ? formatNameFromEmail(currentUser.email) : 'Guest Student');
+
   return (
     <div className="bg-surface-container-low rounded-2xl p-4 border border-outline-variant/30 space-y-3 shadow-xs">
       <div className="flex items-center justify-between">
@@ -108,13 +166,13 @@ export const FirebaseAuthCard: React.FC<FirebaseAuthCardProps> = ({
                 Cloud Database & Auth
               </h4>
               <span className="font-label-badge text-[9px] px-1.5 py-0.2 rounded bg-orange-500/20 text-orange-400 font-bold">
-                Firebase Firestore
+                Firestore
               </span>
             </div>
             <p className="font-body text-[11px] text-on-surface-variant">
               {currentUser
-                ? `Logged in: ${currentUser.displayName || currentUser.email || 'Guest User'}`
-                : 'Sign in to persist your schedule across devices'}
+                ? `Logged in: ${userDisplayName}`
+                : 'Sign in to show your name and sync across devices'}
             </p>
           </div>
         </div>
@@ -131,20 +189,20 @@ export const FirebaseAuthCard: React.FC<FirebaseAuthCardProps> = ({
               {currentUser.photoURL ? (
                 <img
                   src={currentUser.photoURL}
-                  alt="User"
-                  className="w-7 h-7 rounded-full object-cover"
+                  alt={userDisplayName}
+                  className="w-8 h-8 rounded-full object-cover shrink-0"
                 />
               ) : (
-                <div className="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-xs">
-                  {currentUser.displayName ? currentUser.displayName[0] : 'U'}
+                <div className="w-8 h-8 rounded-full bg-primary/20 text-primary flex items-center justify-center font-bold text-xs shrink-0">
+                  {userDisplayName.charAt(0).toUpperCase()}
                 </div>
               )}
               <div className="min-w-0">
                 <span className="font-headline font-bold text-on-surface block truncate">
-                  {currentUser.displayName || 'SyncLife Student'}
+                  {userDisplayName}
                 </span>
                 <span className="text-[10px] text-on-surface-variant truncate block">
-                  {currentUser.email || `UID: ${currentUser.uid.slice(0, 10)}...`}
+                  {currentUser.email || `Guest UID: ${currentUser.uid.slice(0, 8)}...`}
                 </span>
               </div>
             </div>
@@ -152,7 +210,7 @@ export const FirebaseAuthCard: React.FC<FirebaseAuthCardProps> = ({
             <button
               type="button"
               onClick={handleLogout}
-              className="text-[11px] font-semibold text-on-surface-variant hover:text-red-400 px-2 py-1 rounded-lg bg-surface-container-highest cursor-pointer"
+              className="text-[11px] font-semibold text-on-surface-variant hover:text-red-400 px-2 py-1 rounded-lg bg-surface-container-highest cursor-pointer shrink-0"
             >
               Sign out
             </button>
@@ -180,8 +238,108 @@ export const FirebaseAuthCard: React.FC<FirebaseAuthCardProps> = ({
             </button>
           </div>
         </div>
+      ) : showEmailForm ? (
+        /* Email Login & Registration Form */
+        <form onSubmit={handleEmailAuth} className="space-y-2.5 pt-1 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between">
+            <h5 className="font-headline text-xs font-bold text-on-surface">
+              {isRegistering ? 'Create Student Account' : 'Sign In With Email'}
+            </h5>
+            <button
+              type="button"
+              onClick={() => {
+                setShowEmailForm(false);
+                setAuthError(null);
+              }}
+              className="text-on-surface-variant hover:text-on-surface text-xs"
+            >
+              ✕ Cancel
+            </button>
+          </div>
+
+          {authError && (
+            <p className="text-[11px] text-red-400 bg-red-500/10 p-2 rounded-lg border border-red-500/20">
+              {authError}
+            </p>
+          )}
+
+          {isRegistering && (
+            <div className="space-y-1">
+              <label className="text-[10px] uppercase font-bold text-on-surface-variant block">
+                Your Full Name
+              </label>
+              <input
+                type="text"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                placeholder="e.g. Alex Morgan"
+                className="w-full bg-surface-container border border-outline-variant/30 rounded-xl px-2.5 py-1.5 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <label className="text-[10px] uppercase font-bold text-on-surface-variant block">
+              Email Address
+            </label>
+            <input
+              type="email"
+              value={emailInput}
+              onChange={(e) => setEmailInput(e.target.value)}
+              placeholder="student@example.com"
+              required
+              className="w-full bg-surface-container border border-outline-variant/30 rounded-xl px-2.5 py-1.5 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[10px] uppercase font-bold text-on-surface-variant block">
+              Password
+            </label>
+            <input
+              type="password"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              placeholder="••••••••"
+              required
+              minLength={6}
+              className="w-full bg-surface-container border border-outline-variant/30 rounded-xl px-2.5 py-1.5 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={isAuthLoading}
+            className="w-full py-2.5 rounded-xl bg-primary text-on-primary font-headline text-xs font-bold shadow-md hover:bg-primary/95 disabled:opacity-50 transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <span>{isAuthLoading ? 'Authenticating...' : isRegistering ? 'Register & Show My Profile' : 'Sign In'}</span>
+          </button>
+
+          <div className="text-center pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setIsRegistering(!isRegistering);
+                setAuthError(null);
+              }}
+              className="text-[11px] text-primary hover:underline font-semibold cursor-pointer"
+            >
+              {isRegistering
+                ? 'Already have an account? Sign In'
+                : "Don't have an account? Create one"}
+            </button>
+          </div>
+        </form>
       ) : (
+        /* Sign-in Options */
         <div className="space-y-2 pt-1">
+          {authError && (
+            <p className="text-[11px] text-red-400 bg-red-500/10 p-2 rounded-lg border border-red-500/20">
+              {authError}
+            </p>
+          )}
+
+          {/* Google Sign In */}
           <button
             type="button"
             onClick={handleGoogleLogin}
@@ -208,12 +366,23 @@ export const FirebaseAuthCard: React.FC<FirebaseAuthCardProps> = ({
             <span>Sign in with Google</span>
           </button>
 
+          {/* Email Sign In / Up */}
+          <button
+            type="button"
+            onClick={() => setShowEmailForm(true)}
+            className="w-full py-2 px-3 rounded-xl bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant/30 text-on-surface font-headline text-xs font-semibold transition active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <span className="material-symbols-outlined text-[16px]">mail</span>
+            <span>Sign in with Email</span>
+          </button>
+
+          {/* Guest Sign In */}
           <button
             type="button"
             onClick={handleGuestLogin}
-            className="w-full py-1.5 px-3 rounded-xl bg-surface-container-high hover:bg-surface-container-highest border border-outline-variant/30 text-on-surface-variant font-headline text-xs font-semibold transition active:scale-95 cursor-pointer text-center"
+            className="w-full py-1.5 px-3 rounded-xl text-on-surface-variant hover:text-on-surface text-[11px] font-medium transition cursor-pointer text-center"
           >
-            Continue as Guest (Anonymous Sync)
+            Continue as Guest (Anonymous)
           </button>
         </div>
       )}

@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { User } from 'firebase/auth';
 import { TabType } from '../types';
+import { subscribeToAuth, formatNameFromEmail } from '../firebase/authService';
 
 interface HeaderProps {
   activeTab: TabType;
@@ -16,6 +18,14 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenStopwatch,
   onOpenGemini,
 }) => {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const unsub = subscribeToAuth((user) => {
+      setCurrentUser(user);
+    });
+    return () => unsub();
+  }, []);
   const getSubTitle = () => {
     switch (activeTab) {
       case 'today':
@@ -100,13 +110,35 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             aria-label="Student profile"
             onClick={onOpenProfile}
-            className="relative p-0.5 rounded-full hover:opacity-90 active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+            title={
+              currentUser
+                ? `Profile: ${currentUser.displayName || formatNameFromEmail(currentUser.email)} (${currentUser.email || 'Online'})`
+                : 'Student Profile'
+            }
+            className="relative p-0.5 rounded-full hover:opacity-90 active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer shrink-0"
           >
-            <img
-              alt="Profile"
-              className="w-8 h-8 rounded-full object-cover ring-1 ring-outline/30 shadow-xs"
-              src="https://lh3.googleusercontent.com/aida-public/AB6AXuAOMDQoUzDkq-JykuUms-GUFHQbp9_N95r7yHqspuzekkVhYdBNG6CLN2j-ncGvCWUD3qRNXObfTQAmtl71C_tUEjwCNlxXVydizzOQnoMGleKZi7UMZz3aMRuxj9wObeEhGg7w9e0WIhfm9LFRF_K_J4vw6bJeqUdefQY-NgoFOHhcQSoEqRAUMy7B3PELz5MWXEzZyetx25-qqxyfpYM5d10WtoTmACs6trCuITphwSNBJINd6nXX"
-            />
+            {currentUser?.photoURL ? (
+              <img
+                alt="Profile"
+                className="w-8 h-8 rounded-full object-cover ring-1 ring-outline/30 shadow-xs"
+                src={currentUser.photoURL}
+              />
+            ) : currentUser ? (
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-amber-500 text-on-primary font-headline font-bold text-xs flex items-center justify-center shadow-xs ring-1 ring-primary/40">
+                {(currentUser.displayName || formatNameFromEmail(currentUser.email) || 'S').charAt(0).toUpperCase()}
+              </div>
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-surface-container-highest text-on-surface font-headline font-bold text-xs flex items-center justify-center shadow-xs ring-1 ring-outline/30">
+                <span className="material-symbols-outlined text-[18px] text-on-surface-variant">person</span>
+              </div>
+            )}
+
+            {currentUser && (
+              <span
+                className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-surface"
+                title="Account Authenticated"
+              />
+            )}
           </button>
         </div>
       </div>
